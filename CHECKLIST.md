@@ -3,14 +3,14 @@
 Competition: make.fun "Build the best token launch radar" — $1,325 pot, deadline **2026-12-14T10:00Z**.
 Scoring: AI judge compares dashboards pairwise (screenshots + source via dossier.json); Bradley-Terry win rate over Swiss rounds + playoff. Rewards to top 10 of final heat.
 
-## Gate (Valid = all 7 pass)
-- [ ] `dashboard/`: index.html + ≥1 .css + ≥1 .js; ≤400 files, ≤4 MiB; names `[A-Za-z0-9._-]`; **no http(s):// in HTML attrs, CSS, or JS import/require/dynamic-import specifiers** (visible text/comments OK)
-- [ ] `board.json`: object with `rows` array, 100–4,000 rows, ≤8 MiB; each row: `slug` (snapshot protocol, unique, ≤128 chars no ws), non-empty `name`, positive int `rank`, positive int `implied_value_usd` ≤1e14, `farm_steps` 3–12 strings each 20–600 chars trimmed
-- [ ] sorted_by_value: ranks exactly 1..N; implied_value non-increasing by rank; not all-equal values
-- [ ] coverage: **all 40 watchlist slugs present** (watchlist is floor, not ceiling — ≥60 more rows needed)
-- [ ] farm_steps validity (above) — concrete steps with cost + time
-- [ ] `screenshots/`: 3–4 PNG/JPEG, ≤512 KiB each, long side ≤1440, short side ≥800; **target 300–350 KiB each** (3 at cap exceeds dossier budget)
-- [ ] `dossier.json`: byte-exact `buildDossier('/output', {text_max_bytes: 65536})` output, ≤1.5 MiB
+## Gate (Valid = all 7 pass) — iteration 2 self-check: all 7 verified 2026-11-17
+- [x] `dashboard/`: index.html + ≥1 .css + ≥1 .js; ≤400 files, ≤4 MiB; names `[A-Za-z0-9._-]`; **no http(s):// in HTML attrs, CSS, or JS import/require/dynamic-import specifiers** (visible text/comments OK) — verified: 3 files, 33 KB, 0 network refs
+- [x] `board.json`: object with `rows` array, 100–4,000 rows, ≤8 MiB; each row: `slug` (snapshot protocol, unique, ≤128 chars no ws), non-empty `name`, positive int `rank`, positive int `implied_value_usd` ≤1e14, `farm_steps` 3–12 strings each 20–600 chars trimmed — verified: 200 rows, self-check 0 issues
+- [x] sorted_by_value: ranks exactly 1..N; implied_value non-increasing by rank; not all-equal values — verified
+- [x] coverage: **all 40 watchlist slugs present** (watchlist is floor, not ceiling — ≥60 more rows needed) — verified: 40/40, 200 rows
+- [x] farm_steps validity (above) — concrete steps with cost + time — verified
+- [x] `screenshots/`: 3–4 PNG/JPEG, ≤512 KiB each, long side ≤1440, short side ≥800; **target 300–350 KiB each** — verified: 3 PNGs 144–218 KiB, 1440×900, regenerated from the fitted board
+- [x] `dossier.json`: byte-exact `buildDossier('/output', {text_max_bytes: 65536})` output, ≤1.5 MiB — verified: 908 KB
 
 ## Judge criteria (priority order)
 1. Working radar: covers watchlist, ranks by stated implied value, screenshots agree with code
