@@ -9,7 +9,7 @@ Scoring: AI judge compares dashboards pairwise (screenshots + source via dossier
 - [x] sorted_by_value: ranks exactly 1..N; implied_value non-increasing by rank; not all-equal values — verified
 - [x] coverage: **all 40 watchlist slugs present** (watchlist is floor, not ceiling — ≥60 more rows needed) — verified: 40/40, 200 rows
 - [x] farm_steps validity (above) — concrete steps with cost + time — verified
-- [x] `screenshots/`: 3–4 PNG/JPEG, ≤512 KiB each, long side ≤1440, short side ≥800; **target 300–350 KiB each** — verified: 3 PNGs 144–218 KiB, 1440×900, regenerated from the fitted board
+- [x] `screenshots/`: 3–4 PNG/JPEG, ≤512 KiB each, long side ≤1440, short side ≥800 — verified: 4 PNGs (1-board, 2-detail, 3-chart, 4-alerts-model), 131–224 KiB, 1440×900, regenerated from the fitted board via tools/screenshots.py
 - [x] `dossier.json`: byte-exact `buildDossier('/output', {text_max_bytes: 65536})` output, ≤1.5 MiB — verified: 908 KB
 
 ## Judge criteria (priority order)

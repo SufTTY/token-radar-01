@@ -209,6 +209,77 @@
     );
   }
 
+  // Log-log scatter: every board row's TVL against its implied value, with guide lines for whole
+  // TVL multiples (0.1x, 0.3x, 1x, 3x). Drawn from the same rows the table shows, so the picture
+  // and the numbers cannot disagree. Watchlist rows sit above the $50M floor; early rows below.
+  function scatterChart() {
+    var NS = 'http://www.w3.org/2000/svg';
+    function svgEl(tag, attrs) {
+      var n = document.createElementNS(NS, tag);
+      Object.keys(attrs || {}).forEach(function (k) { n.setAttribute(k, attrs[k]); });
+      return n;
+    }
+    var W = 1240, H = 340, ML = 64, MR = 16, MT = 14, MB = 40;
+    var pts = DATA.rows.filter(function (r) { return r.tvl_usd > 0 && r.implied_value_usd > 0; });
+    var xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+    pts.forEach(function (r) {
+      var x = Math.log10(r.tvl_usd), y = Math.log10(r.implied_value_usd);
+      if (x < xmin) xmin = x; if (x > xmax) xmax = x;
+      if (y < ymin) ymin = y; if (y > ymax) ymax = y;
+    });
+    xmin = Math.floor(xmin); xmax = Math.ceil(xmax); ymin = Math.floor(ymin); ymax = Math.ceil(ymax);
+    function X(v) { return ML + (Math.log10(v) - xmin) / (xmax - xmin) * (W - ML - MR); }
+    function Y(v) { return H - MB - (Math.log10(v) - ymin) / (ymax - ymin) * (H - MT - MB); }
+    var svg = svgEl('svg', { viewBox: '0 0 ' + W + ' ' + H, role: 'img', 'aria-label': 'Scatter of TVL against implied value, log scale' });
+    // grid + tick labels per decade
+    for (var d = xmin; d <= xmax; d++) {
+      var v = Math.pow(10, d);
+      svg.appendChild(svgEl('line', { x1: X(v), y1: MT, x2: X(v), y2: H - MB, stroke: 'var(--border)', 'stroke-width': 1 }));
+      var t = svgEl('text', { x: X(v), y: H - MB + 16, 'text-anchor': 'middle', 'font-size': 11, fill: 'var(--muted)' });
+      t.textContent = '$' + (v >= 1e9 ? v / 1e9 + 'B' : v >= 1e6 ? v / 1e6 + 'M' : v / 1e3 + 'K');
+      svg.appendChild(t);
+    }
+    for (var e = ymin; e <= ymax; e++) {
+      var ev = Math.pow(10, e);
+      svg.appendChild(svgEl('line', { x1: ML, y1: Y(ev), x2: W - MR, y2: Y(ev), stroke: 'var(--border)', 'stroke-width': 1 }));
+      var t2 = svgEl('text', { x: ML - 6, y: Y(ev) + 4, 'text-anchor': 'end', 'font-size': 11, fill: 'var(--muted)' });
+      t2.textContent = '$' + (ev >= 1e9 ? ev / 1e9 + 'B' : ev >= 1e6 ? ev / 1e6 + 'M' : ev / 1e3 + 'K');
+      svg.appendChild(t2);
+    }
+    // multiple guide lines: implied = k x TVL
+    [0.1, 0.3, 1, 3].forEach(function (k) {
+      var yTop = Math.pow(10, ymin) * k, yBot = Math.pow(10, ymax) * k;
+      var x1 = Math.pow(10, xmin), x2 = Math.pow(10, xmax);
+      // draw only where inside the box: clip by recomputing endpoints on the visible y-range
+      var lo = Math.max(ymin, Math.log10(k * Math.pow(10, xmin)));
+      var hi = Math.min(ymax, Math.log10(k * Math.pow(10, xmax)));
+      if (hi <= lo) return;
+      var px1 = X(Math.pow(10, lo - Math.log10(k))), px2 = X(Math.pow(10, hi - Math.log10(k)));
+      svg.appendChild(svgEl('line', { x1: px1, y1: Y(Math.pow(10, lo)), x2: px2, y2: Y(Math.pow(10, hi)), stroke: 'var(--muted)', 'stroke-dasharray': '4 4', 'stroke-width': 1, opacity: 0.6 }));
+      var lab = svgEl('text', { x: px2 - 4, y: Y(Math.pow(10, hi)) - 4, 'text-anchor': 'end', 'font-size': 10, fill: 'var(--muted)' });
+      lab.textContent = k + 'x TVL';
+      svg.appendChild(lab);
+    });
+    pts.forEach(function (r) {
+      var onList = r.tvl_usd >= DATA.floor_usd;
+      svg.appendChild(svgEl('circle', {
+        cx: X(r.tvl_usd), cy: Y(r.implied_value_usd), r: r.rank <= 10 ? 5 : 3,
+        fill: onList ? 'var(--accent)' : 'color-mix(in srgb, var(--muted) 55%, transparent)',
+        opacity: onList ? 0.9 : 0.7
+      }));
+    });
+    return el('section', { class: 'panel scatter' },
+      el('h2', { text: 'The board in one picture' }),
+      el('p', { class: 'sub', text: 'Every row plotted, TVL against implied value on log scales. The dashed guides are whole TVL multiples, so a point\u2019s height over its TVL is the model\u2019s multiple. Filled dots are watchlist protocols above the $' + Math.round(DATA.floor_usd / 1e6) + 'M floor; grey dots are the early radar below it.' }),
+      svg,
+      el('div', { class: 'legend' },
+        el('span', null, el('i', { style: 'background: var(--accent)' }), 'Watchlist (TVL \u2265 floor)'),
+        el('span', null, el('i', { style: 'background: color-mix(in srgb, var(--muted) 55%, transparent)' }), 'Early radar (below the floor)'),
+        el('span', { text: 'Larger dots: current top 10' })
+      )
+    );
+  }
+
   function boardTable() {
     var list = sortedRows(rows());
     if (list.length === 0) {
@@ -241,6 +312,7 @@
           el('div', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: 'width:' + Math.max(3, Math.round((r.implied_value_usd / max) * 100)) + '%' })),
           el('span', { class: 'num', text: fmtUsd(r.implied_value_usd) })
         )),
+        el('td', null, el('span', { class: 'mult num', text: (r.implied_value_usd / r.tvl_usd).toFixed(2) + 'x', title: 'Implied value as a multiple of TVL' })),
         el('td', null, el('span', { class: 'status', text: 'no token' }))
       );
       tbody.appendChild(tr);
@@ -256,6 +328,7 @@
             sortHeader('growth', '7d'),
             sortHeader('age', 'Age'),
             sortHeader('implied', 'Implied value'),
+            el('th', { scope: 'col', title: 'Implied value as a multiple of TVL', text: '\u00d7 TVL' }),
             el('th', { scope: 'col', text: 'Token' })
           )),
           tbody
@@ -376,6 +449,7 @@
     shell.appendChild(lede());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
+    if (state.tab === 'pre-token') shell.appendChild(scatterChart());
     if (state.tab === 'pre-token') shell.appendChild(alertsPanel());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());
     app.appendChild(shell);

@@ -28,6 +28,16 @@ the dashboard's methodology panel). Every figure comes from the snapshot itself,
 lists. When the snapshot carries too few anchors, the house constants of radar-1 take over.
 See DESIGN.md for the full design and iteration plan.
 
+## Dashboard
+
+`dashboard/` is one static page, no network calls: a sortable, filterable ranked board (search,
+category filter, pre-token / live-token tabs), a log-log scatter of TVL against implied value with
+whole-TVL multiple guides (`app.js` draws the SVG from the same rows the table shows), a per-protocol
+detail drawer that recomputes the model from the snapshot figures and shows the farm plan, an alerts
+panel (TVL surges, fresh launches under 45 days, out-of-floor movers into the top 50) and a
+methodology panel. The four judge screenshots are regenerated from the built page with
+`python tools/screenshots.py` (headless chromium, 1440x900).
+
 ## License
 
 MIT.

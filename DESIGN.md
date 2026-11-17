@@ -35,7 +35,14 @@ via vendor buildDossier.
   and the full farm plan; text addressed to the judge (methodology panel). Keep source <64 KB.
 - **W4**: real screenshots (headless chromium, 1440×900, 300–350 KiB each — must be generated
   during a recorded session), dossier regenerated, gate self-check, README badges.
-- **W5**: transcript bundle flags, GitHub repo polish (About, topics), dry-run `check`, submit
+- **W5**: iteration 3 dashboard pass: compact rows (more protocols per view), a new "x TVL" column
+  (implied value as a multiple of TVL, so the model's pricing is visible per row), and a log-log
+  scatter panel "The board in one picture" (every row plotted, TVL against implied value, dashed
+  guides at 0.1x/0.3x/1x/3x TVL, watchlist vs early-radar dots) — drawn from the same rows the table
+  shows. Screenshots now 4: board, detail, chart, alerts+model, regenerated via
+  tools/screenshots.py. A TVL-elasticity fit term was prototyped and rejected: holdout error barely
+  moved (86.8% vs 87.5% median), so the honest 3-coefficient fit stays.
+- **W6**: transcript bundle flags, GitHub repo polish (About, topics), dry-run `check`, submit
   with second-eye approval before 2026-12-14T10:00Z.
 
 ## Risks
