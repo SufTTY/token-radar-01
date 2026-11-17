@@ -87,5 +87,6 @@ writeFileSync(join(out, 'dossier.json'), buildDossier(out, { text_max_bytes: TEX
 
 process.stdout.write(
   `token radar: ${snapshot.protocols.length} protocols, ${snapshot.watchlist.length} on the watchlist, ${board.length} rows scored (${radar.early_size} early, ${radar.live_size} live set aside)\n` +
+    `token radar: fit ${radar.fit.fitted ? `fitted on ${radar.fit.anchors} anchors (${radar.fit.train} train / ${radar.fit.holdout} holdout, ${radar.fit.trimmed} trimmed), holdout median error ${radar.fit.holdout_error_pct === null ? 'n/a' : `${radar.fit.holdout_error_pct.toFixed(0)}%`}` : 'not fitted: house constants scored the board'}; ${radar.alerts.length} alerts raised\n` +
     `token radar: wrote ${join(out, 'board.json')}, ${join(out, 'data.js')}, ${join(out, 'dashboard')} (3 files), ${join(out, 'screenshots')} (${shots.length} images) and ${join(out, 'dossier.json')}\n`,
 );

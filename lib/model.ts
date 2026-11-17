@@ -6,7 +6,10 @@
 // snapshot's live-token protocols are kept apart and shown as the market's own values, never mixed into
 // the ranked board.
 //
-// Implied value follows only from the snapshot's own figures:
+// Implied value follows only from the snapshot's own figures. The model is fitted, not assumed: the
+// snapshot's trading tokens (market cap over TVL, by age and seven-day growth) anchor a least-squares
+// fit in log space, and a deterministic 20% holdout scores it out of sample. When the snapshot carries
+// too few anchors, the house constants of radar-1 take over:
 //
 //   base       = tvl_usd x BASE_MULTIPLE
 //   growth     = clamp(change_7d, -60, 120) per cent
@@ -14,8 +17,7 @@
 //   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
 //   implied    = max(1, round(base x growthMult x maturity))
 //
-// The constants are the house model's, stated in the dashboard and changeable in the model sandbox. No
-// protocol name is ever special-cased: the same function scores every row.
+// No protocol name is ever special-cased: the same function scores every row.
 
 /** The snapshot's protocol entry: exactly the ten fields the sealed input carries. */
 export interface SnapshotProtocol {
@@ -64,7 +66,152 @@ export const MODEL: ModelConstants = {
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
-export const MODEL_VERSION = 'radar-1';
+export const MODEL_VERSION = 'radar-2-fitted';
+
+/**
+ * The fitted model: coefficients read off the snapshot's own trading tokens. Every live-token protocol
+ * with a market cap, a TVL and a listed date is an anchor; the model is a least-squares fit in log space
+ *
+ *   ln(mcap / tvl) = b0 + b1 x (change_7d / 100) + b2 x ln(age_days + 30)
+ *
+ * so implied value stays a function of the same three snapshot figures, but the constants are measured,
+ * not assumed. A deterministic 20% holdout (slug hash) scores the fit out of sample.
+ */
+export interface Fit {
+  fitted: boolean;
+  anchors: number;
+  train: number;
+  holdout: number;
+  b0: number;
+  b1: number;
+  b2: number;
+  median_age_days: number;
+  train_error_pct: number | null;
+  holdout_error_pct: number | null;
+  trimmed: number;
+}
+
+/** The house fit of last resort, when the snapshot carries too few anchors to fit on. */
+export const HOUSE_FIT: Fit = {
+  fitted: false,
+  anchors: 0,
+  train: 0,
+  holdout: 0,
+  b0: Math.log(0.25) - 0.5 * Math.log(30),
+  b1: 0.5,
+  b2: 0,
+  median_age_days: 365,
+  train_error_pct: null,
+  holdout_error_pct: null,
+  trimmed: 0,
+};
+
+const GROWTH_FLOOR = -60;
+const GROWTH_CAP = 120;
+
+/** A deterministic 0..4 bucket from a slug, so the holdout split is reproducible byte for byte. */
+function slugBucket(slug: string): number {
+  let h = 0;
+  for (let i = 0; i < slug.length; i++) h = (h * 31 + slug.charCodeAt(i)) >>> 0;
+  return h % 5;
+}
+
+/** Solve a 3x3 linear system by Gauss elimination; null when it is singular. */
+function solve3(a: number[][], y: number[]): number[] | null {
+  const m = a.map((row, i) => [...row, y[i]!]);
+  for (let col = 0; col < 3; col++) {
+    let piv = col;
+    for (let r = col + 1; r < 3; r++) if (Math.abs(m[r]![col]!) > Math.abs(m[piv]![col]!)) piv = r;
+    if (Math.abs(m[piv]![col]!) < 1e-10) return null;
+    [m[col], m[piv]] = [m[piv]!, m[col]!];
+    for (let r = 0; r < 3; r++) {
+      if (r === col) continue;
+      const f = m[r]![col]! / m[col]![col]!;
+      for (let c = col; c <= 3; c++) m[r]![c] = m[r]![c]! - f * m[col]![c]!;
+    }
+  }
+  return [m[0]![3]! / m[0]![0]!, m[1]![3]! / m[1]![1]!, m[2]![3]! / m[2]![2]!];
+}
+
+/** Ordinary least squares on rows of [1, g, lnAge]; null when it cannot be solved. */
+function ols(rows: number[][]): number[] | null {
+  const ata = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+  const aty = [0, 0, 0];
+  for (const [one, g, la, yv] of rows) {
+    const x = [one, g, la];
+    for (let i = 0; i < 3; i++) {
+      aty[i]! += x[i]! * yv;
+      for (let j = 0; j < 3; j++) ata[i]![j] = ata[i]![j]! + x[i]! * x[j]!;
+    }
+  }
+  return solve3(ata, aty);
+}
+
+/** The median of a numeric array. */
+function median(xs: number[]): number {
+  const s = xs.slice().sort((a, b) => a - b);
+  const n = s.length;
+  return n === 0 ? 0 : n % 2 === 1 ? s[(n - 1) / 2]! : (s[n / 2 - 1]! + s[n / 2]!) / 2;
+}
+
+/** Fit the value model on the snapshot's trading tokens; fall back to the house fit when data is thin. */
+export function fitModel(snapshot: Snapshot): Fit {
+  const anchors = snapshot.protocols
+    .filter((p) => p.mcap_usd !== null && p.mcap_usd > 0 && p.tvl_usd > 0 && p.listed_at !== null)
+    .map((p) => {
+      const g = Math.min(GROWTH_CAP, Math.max(GROWTH_FLOOR, p.change_7d ?? 0)) / 100;
+      const age = ageDays(snapshot.as_of, p.listed_at) ?? 365;
+      return { slug: p.slug, g, la: Math.log(age + 30), y: Math.log(p.mcap_usd! / p.tvl_usd), age, tvl: p.tvl_usd, mcap: p.mcap_usd! };
+    })
+    .filter((a) => Number.isFinite(a.y) && a.mcap < 1e13 && a.tvl >= 1_000_000);
+  if (anchors.length < 10) return HOUSE_FIT;
+
+  let sample = anchors.filter((a) => slugBucket(a.slug) !== 0);
+  let fit = ols(sample.map((a) => [1, a.g, a.la, a.y]));
+  if (fit === null) return HOUSE_FIT;
+  // One trim pass: anchors the first fit misses by more than 1.5 log units (32x) are data errors, not comps.
+  let trimmed = 0;
+  if (sample.length >= 12) {
+    const kept = sample.filter((a) => {
+      const resid = Math.abs(a.y - (fit![0]! + fit![1]! * a.g + fit![2]! * a.la));
+      if (resid > 1.5) { trimmed++; return false; }
+      return true;
+    });
+    if (kept.length >= 8) {
+      const refit = ols(kept.map((a) => [1, a.g, a.la, a.y]));
+      if (refit !== null) { fit = refit; sample = kept; }
+    }
+  }
+
+  const predict = (a: { tvl: number; mcap: number; g: number; la: number }): number => a.tvl * Math.exp(fit![0]! + fit![1]! * a.g + fit![2]! * a.la);
+  const errPct = (list: typeof anchors): number | null => {
+    if (list.length === 0) return null;
+    return median(list.map((a) => Math.abs(predict(a) - a.mcap) / a.mcap)) * 100;
+  };
+  const holdout = anchors.filter((a) => slugBucket(a.slug) === 0);
+  return {
+    fitted: true,
+    anchors: anchors.length,
+    train: sample.length,
+    holdout: holdout.length,
+    b0: fit[0]!,
+    b1: fit[1]!,
+    b2: fit[2]!,
+    median_age_days: median(anchors.map((a) => a.age)),
+    train_error_pct: errPct(sample),
+    holdout_error_pct: errPct(holdout),
+    trimmed,
+  };
+}
+
+/** One radar alert: a watchlist or board row the snapshot itself flags, with the reason. */
+export interface Alert {
+  slug: string;
+  name: string;
+  kind: 'surge' | 'new-launch' | 'top-mover';
+  rank: number | null;
+  detail: string;
+}
 
 /** How many pre-token protocols below the watchlist floor the early radar carries, by TVL. */
 export const EARLY_ROWS = 160;
@@ -133,19 +280,21 @@ export interface LiveRow {
   change_7d: number | null;
 }
 
-/** Everything the dashboard needs: the board, the live set, and the model it runs. */
+/** Everything the dashboard needs: the board, the live set, the fit, and the alerts it raises. */
 export interface RadarData {
   as_of: string;
   source: string;
   floor_usd: number;
   model: ModelConstants;
   model_version: string;
+  fit: Fit;
   watchlist_size: number;
   board_size: number;
   early_size: number;
   live_size: number;
   rows: RadarRow[];
   live: LiveRow[];
+  alerts: Alert[];
 }
 
 /** Why the snapshot is not one this model can score. */
@@ -172,17 +321,29 @@ export function ageDays(asOf: string, listedAt: string | null): number | null {
   return Math.max(0, Math.floor((a - b) / DAY_MS));
 }
 
-/** The three multipliers and the implied value one protocol gets under `model`. */
-export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants): { implied: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
+/** The three multipliers and the implied value one protocol gets: fitted when the snapshot allows it. */
+export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: ModelConstants, fit: Fit = HOUSE_FIT): { implied: number; growthPct: number; growthMult: number; maturityMult: number; age: number | null } {
   const age = ageDays(asOf, protocol.listed_at);
   const rawGrowth = finite(protocol.change_7d, 0);
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
-  const growthMult = 1 + (growthPct / 100) * model.growth_weight;
-  const ageForModel = age ?? model.unknown_age_days;
-  const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-  const base = protocol.tvl_usd * model.base_multiple;
-  const implied = Math.max(1, Math.round(base * growthMult * maturityMult));
-  return { implied, growthPct, growthMult, maturityMult, age };
+  const ageForModel = age ?? fit.median_age_days;
+  let implied: number;
+  let growthMult: number;
+  let maturityMult: number;
+  if (fit.fitted) {
+    // implied = tvl x exp(b0 + b1 x g + b2 x ln(age + 30)); the multipliers below decompose the same
+    // number as base x growth x maturity, so the board's row and the dashboard's arithmetic agree.
+    const lg = growthPct / 100;
+    const lm = Math.log(ageForModel + 30);
+    implied = protocol.tvl_usd * Math.exp(fit.b0 + fit.b1 * lg + fit.b2 * lm);
+    growthMult = Math.exp(fit.b1 * lg);
+    maturityMult = Math.exp(fit.b2 * (lm - Math.log(30)));
+  } else {
+    growthMult = 1 + (growthPct / 100) * model.growth_weight;
+    maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
+    implied = protocol.tvl_usd * model.base_multiple * growthMult * maturityMult;
+  }
+  return { implied: Math.max(1, Math.round(implied)), growthPct, growthMult, maturityMult, age };
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -212,7 +373,8 @@ export interface BoardSummary {
 }
 
 /** The protocols the board ranks, strongest first, with ranks 1..n. */
-export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
+export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; fit: Fit } {
+  const fit = fitModel(snapshot);
   const index = bySlug(snapshot.protocols);
   const chosen = new Map<string, SnapshotProtocol>();
   // The watchlist is the floor: every slug, even one the snapshot no longer carries (it cannot, but the
@@ -230,11 +392,14 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
   for (const p of early) chosen.set(p.slug, p);
 
   const scored = [...chosen.values()].map((p) => {
-    const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, model);
+    const { implied, growthPct, growthMult, maturityMult, age } = impliedValue(p, snapshot.as_of, model, fit);
     return { p, implied, growthPct, growthMult, maturityMult, age };
   });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
-  return scored.map((s, i) => ({
+  // The fitted coefficients decompose into the row's three shown multipliers: base x growth x maturity
+  // multiplies back to exactly the fitted implied value, so the page can recompute the board's number.
+  const baseEff = fit.fitted ? Math.exp(fit.b0 + fit.b2 * Math.log(30)) : model.base_multiple;
+  const board = scored.map((s, i) => ({
     rank: i + 1,
     slug: s.p.slug,
     name: s.p.name,
@@ -250,7 +415,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     age_days: s.age,
     implied_value_usd: s.implied,
     model: {
-      base_multiple: model.base_multiple,
+      base_multiple: Math.round(baseEff * 1e6) / 1e6,
       growth_pct: s.growthPct,
       growth_multiplier: round4(s.growthMult),
       maturity_multiplier: round4(s.maturityMult),
@@ -258,6 +423,7 @@ export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): B
     },
     farm_steps: farmSteps(s.p, s.age).map(stepText),
   }));
+  return { board, fit };
 }
 
 const round4 = (n: number): number => Math.round(n * 1e4) / 1e4;
@@ -387,9 +553,37 @@ export function radarRow(row: BoardRow): RadarRow {
   };
 }
 
+/** The alerts the snapshot itself raises on the board: surges, fresh launches, top movers. */
+export function buildAlerts(board: BoardRow[], snapshot: Snapshot): Alert[] {
+  const watch = new Set(snapshot.watchlist);
+  const alerts: Alert[] = [];
+  // Watchlist surges first: a pre-token protocol the watchlist tracks whose TVL jumped this week.
+  for (const r of board) {
+    if (watch.has(r.slug) && r.change_7d !== null && r.change_7d >= 25) {
+      alerts.push({ slug: r.slug, name: r.name, kind: 'surge', rank: r.rank, detail: `Watchlist TVL ${r.change_7d >= 0 ? '+' : ''}${r.change_7d.toFixed(1)}% in seven days, now ranked #${r.rank}.` });
+    }
+  }
+  // Fresh launches: board rows listed within the last 45 days.
+  for (const r of board) {
+    if (r.age_days !== null && r.age_days <= 45) {
+      alerts.push({ slug: r.slug, name: r.name, kind: 'new-launch', rank: r.rank, detail: `Listed ${r.age_days} day${r.age_days === 1 ? '' : 's'} ago, ranked #${r.rank} with no token on record.` });
+    }
+  }
+  // Top movers across the whole board, beyond the watchlist floor.
+  for (const r of board) {
+    if (!watch.has(r.slug) && r.change_7d !== null && r.change_7d >= 60 && r.rank <= 50) {
+      alerts.push({ slug: r.slug, name: r.name, kind: 'top-mover', rank: r.rank, detail: `Below the watchlist floor but TVL ${r.change_7d >= 0 ? '+' : ''}${r.change_7d.toFixed(1)}% in seven days, ranked #${r.rank}.` });
+    }
+  }
+  // Dedupe: a slug keeps its first (strongest) alert.
+  const seen = new Set<string>();
+  const unique = alerts.filter((a) => (seen.has(a.slug) ? false : (seen.add(a.slug), true)));
+  return unique.slice(0, 12);
+}
+
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
-  const board = buildBoard(snapshot, model);
+  const { board, fit } = buildBoard(snapshot, model);
   const live = liveRows(snapshot);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
   const radar: RadarData = {
@@ -397,13 +591,15 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     source: snapshot.source,
     floor_usd: snapshot.floor_usd,
     model,
-    model_version: MODEL_VERSION,
+    model_version: fit.fitted ? MODEL_VERSION : 'radar-1-house',
+    fit,
     watchlist_size: snapshot.watchlist.length,
     board_size: board.length,
     early_size: early,
     live_size: live.length,
     rows: board.map(radarRow),
     live,
+    alerts: buildAlerts(board, snapshot),
   };
   return { board, radar };
 }

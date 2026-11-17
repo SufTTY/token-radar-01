@@ -28,12 +28,18 @@
   }
   // The model in one function: the page recomputes a row from the snapshot figures and checks the
   // number board.json carries, so the page's code and the board's data are visibly the same arithmetic.
-  function impliedOf(row, model) {
-    var growth = Math.min(model.growth_cap, Math.max(model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
-    var growthMult = 1 + (growth / 100) * model.growth_weight;
-    var age = row.age_days === null || row.age_days === undefined ? model.unknown_age_days : row.age_days;
-    var maturity = model.maturity_floor + (Math.min(Math.max(age, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-    return Math.max(1, Math.round(row.tvl_usd * model.base_multiple * growthMult * maturity));
+  // When the board was scored by the fitted model, the page runs the same fitted coefficients.
+  function impliedOf(row) {
+    var f = DATA.fit;
+    var growth = Math.min(DATA.model.growth_cap, Math.max(DATA.model.growth_floor, row.change_7d === null || row.change_7d === undefined ? 0 : row.change_7d));
+    if (f && f.fitted) {
+      var age = row.age_days === null || row.age_days === undefined ? f.median_age_days : row.age_days;
+      return Math.max(1, Math.round(row.tvl_usd * Math.exp(f.b0 + f.b1 * (growth / 100) + f.b2 * Math.log(age + 30))));
+    }
+    var growthMult = 1 + (growth / 100) * DATA.model.growth_weight;
+    var age2 = row.age_days === null || row.age_days === undefined ? DATA.model.unknown_age_days : row.age_days;
+    var maturity = DATA.model.maturity_floor + (Math.min(Math.max(age2, 0), DATA.model.maturity_days) / DATA.model.maturity_days) * DATA.model.maturity_range;
+    return Math.max(1, Math.round(row.tvl_usd * DATA.model.base_multiple * growthMult * maturity));
   }
 
   function el(tag, attrs) {
@@ -283,13 +289,37 @@
 
   function modelPanel() {
     var m = DATA.model;
+    var f = DATA.fit;
+    var fitted = f && f.fitted;
+    var formula = fitted
+      ? 'implied = round( tvl_usd x exp(' + f.b0.toFixed(4) + ' + ' + f.b1.toFixed(4) + ' x clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ')/100 + ' + f.b2.toFixed(4) + ' x ln(age_days + 30)) )'
+      : 'implied = round( tvl_usd x ' + m.base_multiple + ' x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') )';
+    var how = fitted
+      ? 'The coefficients are fitted, not assumed: every protocol in the snapshot whose token already trades is an anchor, and ln(market cap / TVL) is regressed on growth and age by least squares. ' + f.anchors + ' anchors were usable; ' + f.trimmed + ' outliers beyond 1.5 log units were trimmed; ' + f.train + ' trained the fit and ' + f.holdout + ' were held out. On the holdout the fit prices a traded token within a median of ' + (f.holdout_error_pct === null ? 'n/a' : f.holdout_error_pct.toFixed(0) + '%') + ' of its real market cap (in-sample median ' + (f.train_error_pct === null ? 'n/a' : f.train_error_pct.toFixed(0) + '%') + '). The same function then prices the pre-token board. A protocol with no listed date uses the anchors\u2019 median age, ' + Math.round(f.median_age_days) + ' days.'
+      : 'The snapshot carries too few trading tokens to fit on, so the house constants of radar-1 score the board. TVL and seven-day growth come from the snapshot; age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days.';
     return el('section', { class: 'panel model' },
       el('h2', { text: 'How implied value is computed' }),
       el('p', { class: 'sub', text: 'Every row is scored by one function of the snapshot figures. No protocol name is special-cased, and no row is hand-picked.' }),
-      el('div', { class: 'formula' },
-        'implied = round( tvl_usd x ' + m.base_multiple + ' x (1 + clamp(change_7d, ' + m.growth_floor + ', ' + m.growth_cap + ') / 100 x ' + m.growth_weight + ') x (' + m.maturity_floor + ' + min(age_days, ' + m.maturity_days + ') / ' + m.maturity_days + ' x ' + m.maturity_range + ') )'
-      ),
-      el('p', { class: 'sub', text: 'TVL and seven-day growth come from the snapshot. Age is the time since the protocol was first listed, the best record of how long it has run with no token; an unlisted age uses ' + m.unknown_age_days + ' days. The early radar is every pre-token protocol below the watchlist floor, by TVL, and the live-token protocols are set aside with their market caps shown.' })
+      el('div', { class: 'formula' }, formula),
+      el('p', { class: 'sub', text: how })
+    );
+  }
+
+  function alertsPanel() {
+    if (!DATA.alerts || DATA.alerts.length === 0) return null;
+    var kindLabel = { 'surge': 'TVL surge', 'new-launch': 'fresh launch', 'top-mover': 'mover below the floor' };
+    return el('section', { class: 'panel alerts' },
+      el('h2', { text: 'Alerts this snapshot raises' }),
+      el('p', { class: 'sub', text: 'The board flags what moved: watchlist TVL surges, protocols younger than 45 days with no token, and out-of-floor movers into the top 50. Every alert is derived from the snapshot figures, not a hand-written list.' }),
+      el('ul', { class: 'alert-list' }, DATA.alerts.map(function (a) {
+        return el('li', { class: 'alert alert-' + a.kind },
+          el('button', { type: 'button', class: 'alert-open', onclick: function () { openDetail(a.slug); } },
+            el('b', { text: a.name }),
+            el('span', { class: 'kind', text: kindLabel[a.kind] || a.kind }),
+            el('span', { class: 'sub', text: a.detail })
+          )
+        );
+      }))
     );
   }
 
@@ -321,7 +351,7 @@
         el('div', null, el('span', { text: 'Maturity multiplier' }), el('b', { class: 'num', text: String(row.maturity_multiplier) })),
         el('div', null, el('span', { text: 'Implied value' }), el('b', { class: 'num', text: fmtUsd(row.implied_value_usd) }))
       ),
-      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row, DATA.model)) + (impliedOf(row, DATA.model) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
+      el('p', { class: 'sub', text: 'Model ' + DATA.model_version + ': the same function scores every protocol. The page recomputes this row as ' + fmtUsd(impliedOf(row)) + (impliedOf(row) === row.implied_value_usd ? ', the same number board.json carries.' : ', which differs from the board: the data would be stale.') + ' This is an estimate, not a price.' })
     ));
     dialog.appendChild(el('section', { class: 'detail-section' },
       el('h3', { text: 'Farm plan' }),
@@ -346,6 +376,7 @@
     shell.appendChild(lede());
     shell.appendChild(controls());
     shell.appendChild(state.tab === 'pre-token' ? boardTable() : liveTable());
+    if (state.tab === 'pre-token') shell.appendChild(alertsPanel());
     if (state.tab === 'pre-token') shell.appendChild(modelPanel());
     app.appendChild(shell);
     app.setAttribute('aria-busy', 'false');

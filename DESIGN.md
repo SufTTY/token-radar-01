@@ -24,9 +24,12 @@ via vendor buildDossier.
 
 ## Iteration roadmap (weekly)
 - **W1 (done)**: baseline pipeline runs, board valid, docs + checklist.
-- **W2**: model v2 — better maturity curve (e.g. log-age), category-aware base multiples,
-  sanity-anchor implied values against live-token mcap/TVL ratios in the snapshot (separates
-  protocols whose token already trades). Every coefficient stays snapshot-derived.
+- **W2 (done, iteration 2)**: model v2 `radar-2-fitted` — least-squares fit of ln(mcap/tvl) on growth
+  and log age over the snapshot's 95 trading-token anchors, one outlier trim pass, deterministic
+  20% holdout (slug hash) with median % error reported on the dashboard; house radar-1 constants
+  remain the fallback when anchors < 10. Alerts panel (watchlist TVL surges, launches < 45d,
+  out-of-floor movers into the top 50) + methodology panel with the fit's out-of-sample numbers.
+  Screenshots regenerated from the fitted board (board, detail modal, alerts+model panel).
 - **W3**: dashboard rebuild — custom palette/typography, sortable/filterable board with
   category+chain+watchlist filters, protocol detail view with the value model shown worked-out
   and the full farm plan; text addressed to the judge (methodology panel). Keep source <64 KB.

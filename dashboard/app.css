@@ -98,6 +98,15 @@ tbody tr[data-selected="true"] { background: color-mix(in srgb, var(--accent) 8%
 .status::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
 
 .model { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-3); }
+.alerts { margin-top: var(--step-4); padding: var(--step-5); display: grid; gap: var(--step-3); }
+.alert-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--step-2); }
+.alert .alert-open { display: grid; grid-template-columns: auto auto 1fr; gap: var(--step-2); align-items: baseline; width: 100%; text-align: left; background: none; border: 1px solid var(--line, #ddd); border-radius: 8px; padding: var(--step-2) var(--step-3); cursor: pointer; font: inherit; color: inherit; }
+.alert .alert-open:hover { border-color: currentColor; }
+.alert .kind { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; opacity: 0.75; }
+.alert-surge .kind { color: #b45309; }
+.alert-new-launch .kind { color: #1d4ed8; }
+.alert-top-mover .kind { color: #047857; }
+
 .formula { font-family: var(--font-num); font-size: 13px; line-height: 1.7; color: var(--muted); overflow-wrap: anywhere; }
 .empty { padding: var(--step-7) var(--step-5); text-align: center; display: grid; gap: var(--step-3); justify-items: center; }
 .empty p { color: var(--muted); }

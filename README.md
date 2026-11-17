@@ -16,9 +16,13 @@ Node 22.18+, standard library only. Output lands in `out/`: `board.json` (the ra
 
 ## Model
 
-`implied_value = tvl × 0.25 × (1 + clamp(change_7d, -60, 120)/100 × 0.5) × maturity(age_days)`
-— maturity rises from 0.6 to 1.0 over three years with no token; every figure comes from the
-snapshot itself, no hardcoded name lists. See DESIGN.md for the full design and iteration plan.
+`implied = tvl × exp(b0 + b1·g + b2·ln(age_days + 30))` — the coefficients are fitted, not assumed:
+every snapshot protocol whose token already trades is an anchor, ln(mcap/tvl) is regressed on
+clamped 7-day growth and log age by least squares (outliers beyond 1.5 log units trimmed once), and a
+deterministic 20% holdout of the anchors scores the fit out of sample (median error is reported in
+the dashboard's methodology panel). Every figure comes from the snapshot itself, no hardcoded name
+lists. When the snapshot carries too few anchors, the house constants of radar-1 take over.
+See DESIGN.md for the full design and iteration plan.
 
 ## License
 
